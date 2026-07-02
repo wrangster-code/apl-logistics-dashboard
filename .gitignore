@@ -1,0 +1,25 @@
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Dataset files
+data/raw/*.csv
+data/processed/*.csv
+*.csv
+
+# Trained Models
+models/*.pkl
+models/*.joblib
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
