@@ -9,12 +9,9 @@ venv.bak/
 
 # Dataset files
 data/raw/*.csv
-data/processed/*.csv
-*.csv
 
 # Trained Models
 models/*.pkl
-models/*.joblib
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints
