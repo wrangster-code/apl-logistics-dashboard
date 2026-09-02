@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.express as px
 import joblib
 import os
+import shap
+import matplotlib.pyplot as plt
 
 # --- 1. PAGE CONFIGURATION ---
 # This must be the very first Streamlit command. It sets the browser tab title and expands the layout.
@@ -50,6 +52,42 @@ st.sidebar.markdown("### Operational Filters")
 selected_mode = st.sidebar.multiselect("Shipping Mode", options=df['shipping_mode'].unique(), default=df['shipping_mode'].unique())
 selected_market = st.sidebar.multiselect("Global Market", options=df['market'].unique(), default=df['market'].unique())
 selected_segment = st.sidebar.multiselect("Customer Segment", options=df['customer_segment'].unique(), default=df['customer_segment'].unique())
+
+st.sidebar.divider()
+
+# --- 3.5 REAL-TIME SHIPMENT TRACKING (SIMULATED) ---
+st.sidebar.markdown("### 📡 Live Shipment Tracking")
+st.sidebar.caption("Simulate real-time API telemetry data.")
+
+# Create an input box and a button
+order_id = st.sidebar.text_input("Enter Order ID (or click Track):", "ORD-8402")
+
+if st.sidebar.button("Track Active Shipment"):
+    with st.sidebar:
+        # Simulate network latency for realism
+        import time
+        with st.spinner(f"Pinging satellite telemetry for {order_id}..."):
+            time.sleep(1.5)
+            
+            # Fetch a random row from our dataset to act as the "live" order
+            live_order = df.sample(1).iloc[0]
+            status = live_order['delivery_classification']
+            
+            # Display simulated tracking details
+            st.markdown(f"**Destination:** {live_order['market']} ({live_order['order_region']})")
+            st.markdown(f"**Carrier Mode:** {live_order['shipping_mode']}")
+            
+            # Dynamic timeline UI based on the actual data
+            if status == "Delayed":
+                st.error("🔴 **Status:** IN TRANSIT (DELAY EXCEPTION)")
+                st.markdown("📍 **Last Checkpoint:** Customs Hold / Carrier Bottleneck")
+                st.markdown("⚠️ *Action Required: Customer notification pending.*")
+            elif status == "Early":
+                st.success("🟢 **Status:** DELIVERED (AHEAD OF SCHEDULE)")
+                st.markdown("📍 **Last Checkpoint:** Proof of Delivery Signed")
+            else:
+                st.success("🟢 **Status:** IN TRANSIT (ON SCHEDULE)")
+                st.markdown("📍 **Last Checkpoint:** Regional Distribution Center")
 
 # --- 4. APPLY FILTERS TO DATA ---
 # This creates a "filtered" version of our dataframe based on what the user selects in the sidebar
@@ -166,6 +204,25 @@ with chart_col4:
 
 st.divider()
 
+# --- 8.5 MODEL EVALUATION & COMPARISON ---
+st.markdown("### 🔬 Model Evaluation & Algorithm Comparison")
+st.markdown("To ensure maximum predictive reliability, multiple machine learning algorithms were trained and evaluated. **XGBoost** demonstrated the highest overall performance for this specific logistics dataset.")
+
+try:
+    # Load the metrics CSV we just generated in the notebook
+    metrics_df = pd.read_csv('models/model_metrics.csv')
+    
+    # Display it as a clean, interactive dataframe in the UI
+    st.dataframe(
+        metrics_df, 
+        use_container_width=True, 
+        hide_index=True
+    )
+except FileNotFoundError:
+    st.warning("Model metrics not found. Please ensure the notebook has generated 'model_metrics.csv'.")
+    
+st.divider()
+
 # --- 9. MACHINE LEARNING PREDICTION MODULE ---
 st.markdown("### 🤖 Predictive Intelligence: Delay Risk Forecaster")
 st.markdown("Enter the parameters for a new shipment to predict the likelihood of a delivery delay using our Random Forest model.")
@@ -189,9 +246,9 @@ with st.form("prediction_form"):
     # Every form needs a submit button
     submit_prediction = st.form_submit_button("Predict Delivery Risk")
 
-# --- 10. PROCESS THE PREDICTION ---
+# --- 10. PROCESS THE PREDICTION & EXPLAINABLE AI ---
 if submit_prediction:
-    # 1. Capture the user's inputs into a dictionary matching our feature columns
+    # 1. Capture the user's inputs
     input_data = {
         'shipping_mode': p_mode,
         'customer_segment': p_segment,
@@ -199,23 +256,62 @@ if submit_prediction:
         'order_region': p_region,
         'category_name': p_category
     }
-    
-    # 2. Convert to DataFrame
     input_df = pd.DataFrame([input_data])
     
-    # 3. Encode the text inputs into numbers using our saved label encoders!
     try:
+        # 2. Encode inputs
         for col in input_df.columns:
             input_df[col] = label_encoders[col].transform(input_df[col])
             
-        # 4. Make the prediction
+        # 3. Make Prediction
         prediction = rf_model.predict(input_df)[0]
         
-        # 5. Display the result beautifully
+        # 4. Display Result
         if prediction == 1:
-            st.error("🚨 **High Risk of Delay!** Based on historical data, this shipment configuration is likely to miss its target date. Consider upgrading the shipping mode or notifying the customer.")
+            st.error("🚨 **High Risk of Delay!** Based on historical data, this shipment configuration is likely to miss its target date.")
         else:
             st.success("✅ **On-Time Prediction!** This shipment is projected to arrive within the scheduled timeline.")
             
+        # 5. EXPLAINABLE AI (SHAP)
+        st.markdown("#### 🧠 Why did the model make this prediction?")
+        st.markdown("This **Explainable AI (XAI)** chart shows how each specific parameter contributed to pushing the prediction toward a delay (positive values) or toward an on-time delivery (negative values).")
+        
+        with st.spinner("Generating AI Explanation..."):
+            # Initialize SHAP Tree Explainer
+            explainer = shap.TreeExplainer(rf_model)
+            shap_vals = explainer.shap_values(input_df)
+            
+            # 1. Bulletproof extraction of the 1D array for our single prediction
+            if isinstance(shap_vals, list):
+                # Older SHAP versions return a list of classes: [class_0_array, class_1_array]
+                single_record_shap = shap_vals[1][0]
+            elif len(shap_vals.shape) == 3:
+                # 3D array: (samples, features, classes)
+                single_record_shap = shap_vals[0, :, 1]
+            else:
+                # 2D array: (samples, features)
+                single_record_shap = shap_vals[0]
+                
+            # 2. Map back the original text inputs so the chart is readable to humans
+            readable_features = [f"{col}\n({input_data[col]})" for col in input_data.keys()]
+            
+            # 3. Create a clean, custom Matplotlib Horizontal Bar Chart
+            fig, ax = plt.subplots(figsize=(8, 4))
+            
+            # Color code: Red if the feature pushes towards a delay (>0), Green if on-time (<0)
+            colors = ['#EF553B' if val > 0 else '#00CC96' for val in single_record_shap]
+            
+            ax.barh(readable_features, single_record_shap, color=colors)
+            ax.set_xlabel("SHAP Value (Impact on Delay Risk)")
+            ax.set_title("How each factor influenced this specific prediction:")
+            
+            # Clean up the chart borders for a modern dashboard look
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.spines['left'].set_visible(False)
+            
+            # Render the chart in Streamlit
+            st.pyplot(fig)
+            
     except Exception as e:
-        st.warning(f"Prediction Error: Ensure the selected combination exists in historical data. Details: {e}")
+        st.warning(f"Prediction Error: {e}")
